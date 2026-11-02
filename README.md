@@ -56,7 +56,7 @@ só dizem a data e o grupo da vez, sem nomes de famílias. Se preferir, é poss�
 ## Regras implementadas
 
 - **Rodízio**: Elizeu → Rafael → Alvimar → Cleiber → Gracy → William → Elizeu… O **grupo da semana** de qualquer sábado (inclusive futuro)
-  é o grupo seguinte ao da entrega mais recente antes daquele sábado. Sábados sem família ou sem reunião não avançam o rodízio.
+  é o grupo seguinte ao da entrega mais recente antes daquele sábado. Sábados passados sem registro e sábados sem reunião não avançam o rodízio. **Semanas à frente** mostram o grupo seguinte do rodízio (projeção: cada sábado em aberto antes dele avança um grupo, como se fosse confirmado em ordem).
   Definir ou pular o grupo da vez só em **Configurações → Rodízio** (ação administrativa, registrada); vale a partir do próximo sábado em aberto.
 - **Escolha livre**: mesmo sendo a vez de um grupo, você pode confirmar **qualquer família de qualquer grupo**. Aparece apenas um aviso
   informando que ela é de outro grupo. O rodízio continua a partir do grupo da família escolhida.
@@ -140,3 +140,24 @@ baixe `app-debug.apk` em *Artifacts*. Ou localmente (Node 20, JDK 17, Android SD
 No celular: permita instalar apps desconhecidos, instale o APK e, na primeira abertura, **permita as notificações**.
 Se o Android pedir, em Configurações do app → Bateria, deixe **Sem restrições** e permita **Alarmes e lembretes**.
 No app, os dados ficam só no aparelho (modo local); para sincronizar com o backend, informe o endereço em Configurações → Servidor.
+
+### Detalhes das notificações no app
+- **Vibração longa:** o canal de alerta (`lembretes-orador-v3`) é criado em código nativo (`MainActivity.java`, gerado por `scripts/ajustar-android.js` no build) com importância alta e uma vibração de **cerca de 1 minuto** (1,2 s vibrando / 0,5 s parado, 35 vezes). Se o build não conseguir criar esse canal, ele **falha com erro** em vez de gerar um APK com vibração curta.
+- **Reforço:** na semana que está valendo, cada horário se repete **2 vezes, a cada 3 minutos** (Configurações → Lembretes → *Reforço do alerta*; 0 desliga, até 4). Só **confirmar a família** cancela os lembretes e os reforços.
+- Ao tocar na notificação o app abre, mas ela **permanece** até você arrastá-la. Ao **abrir o app**, as notificações antigas já entregues são limpas da barra (as agendadas continuam).
+- **Testar alerta (5 s):** usa o mesmo canal e a mesma vibração dos lembretes. Bloqueie a tela ou saia do app para testar como no dia a dia. Cada teste usa um número novo, então nunca é tratado pelo Android como “atualização” silenciosa.
+- **Diagnóstico na tela:** em Configurações → Lembretes o app lê o canal como o Android o enxerga e mostra um aviso em vermelho se ele estiver com importância baixa, sem som ou sem vibração.
+
+### Se ainda tocar em silêncio
+O Android deixa o **usuário** (ou o próprio sistema) mudar um canal depois de criado, e alguns celulares reduzem avisos sozinhos. Confira, nesta ordem:
+1. **Desinstale o app antigo** e instale o novo APK (o canal novo `v3` só vale com a versão nova; canais antigos continuam com a vibração curta).
+2. Segure uma notificação do app → **Configurações** → *Lembretes da lembrancinha*: **Alerta/Urgente** (aparece na tela), **Som** ligado e **Vibração** ligada.
+3. **Não perturbe / Modos:** inclua o app como exceção ou o Android silencia tudo. Modo **silencioso** total também desliga a vibração; use *Vibrar* no botão de volume.
+4. **Android 15 / Pixel:** Configurações → Som e vibração → **Resfriamento de notificações** (*Notification cooldown*): desligue. Ele reduz volume e vibração de avisos seguidos do mesmo app, o que atrapalha testes repetidos e os reforços.
+5. **Samsung/Xiaomi/Motorola:** bateria do app em **Sem restrições** (ou “Não otimizar”), permita **Alarmes e lembretes** e desligue *notificações silenciosas automáticas / inteligentes* se existirem.
+6. Configurações → Lembretes → **Reagendar agora** e depois **Testar alerta**.
+- O nome do grupo da vez aparece só na primeira semana pendente; nas seguintes a notificação mostra apenas a data do sábado.
+- O ícone do app é a foto inteira (`img/icone.png`; tamanhos Android em `icone/`).
+
+### Tema claro/escuro
+Em **Configurações → Aparência**: *Automático* (segue o tema do celular), *Claro* ou *Escuro*. A escolha vale só no aparelho e é aplicada na hora.
