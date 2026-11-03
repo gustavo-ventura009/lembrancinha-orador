@@ -45,7 +45,7 @@ em **Configurações → Servidor** informe o endereço do backend e o token.
 ## Lembretes de verdade (site fechado)
 1. Instale o app **ntfy** no celular (Android/iPhone, gratuito) e assine um tópico difícil de adivinhar, ex.: `lembrancinha-gustavo-x7k2`.
 2. No sistema, **Configurações → Lembretes**: preencha o tópico, salve e clique em **Testar push do servidor**.
-3. O servidor confere a cada 30 segundos. De **quarta a sábado**, às **08h, 11h, 14h, 17h e 20h** (horas editáveis, fuso `America/Sao_Paulo`),
+3. O servidor confere a cada 30 segundos. De **quarta a sábado**, nos horários configurados em **Configurações → Lembretes** (aceita minutos, por exemplo `08:15, 11:30, 14:45`; fuso `America/Sao_Paulo`),
    envia um push **enquanto o sábado alvo não tiver família confirmada**. Cada horário é enviado uma única vez.
 4. Abrir o site, ver ou tocar na notificação **não cancela nada**. Só **confirmar uma família** encerra os lembretes da semana;
    na semana seguinte eles voltam na quarta às 08h.
@@ -55,11 +55,14 @@ só dizem a data e o grupo da vez, sem nomes de famílias. Se preferir, é poss�
 
 ## Regras implementadas
 
-- **Rodízio**: Elizeu → Rafael → Alvimar → Cleiber → Gracy → William → Elizeu… O **grupo da semana** de qualquer sábado (inclusive futuro)
-  é o grupo seguinte ao da entrega mais recente antes daquele sábado. Sábados passados sem registro e sábados sem reunião não avançam o rodízio. **Semanas à frente** mostram o grupo seguinte do rodízio (projeção: cada sábado em aberto antes dele avança um grupo, como se fosse confirmado em ordem).
+- **Rodízio**: Elizeu → Rafael → Alvimar → Cleiber → Gracy → William → Elizeu… A vez **só passa para o grupo seguinte quando uma família do
+  próprio grupo da vez entrega**. Se você confirmar alguém de outro grupo, a vez continua com o grupo que ficou devendo e volta para ele
+  na semana seguinte (ex.: vez do Rafael, entrou alguém do Alvimar → semana seguinte é do Rafael de novo). Um grupo que entregou fora da vez
+  e ainda não tinha chegado a sua vez no ciclo é pulado quando o rodízio chegar nele. O **grupo da semana** de qualquer sábado (inclusive futuro)
+  é calculado a partir das entregas anteriores a ele. Sábados passados sem registro e sábados sem reunião não avançam o rodízio. **Semanas à frente** mostram o grupo seguinte do rodízio (projeção: cada sábado em aberto antes dele avança um grupo, como se fosse confirmado em ordem).
   Definir ou pular o grupo da vez só em **Configurações → Rodízio** (ação administrativa, registrada); vale a partir do próximo sábado em aberto.
 - **Escolha livre**: mesmo sendo a vez de um grupo, você pode confirmar **qualquer família de qualquer grupo**. Aparece apenas um aviso
-  informando que ela é de outro grupo. O rodízio continua a partir do grupo da família escolhida.
+  informando que ela é de outro grupo. O rodízio não avança: a vez continua com o grupo que ficou devendo.
 - **Navegar entre semanas**: no painel, as setas ‹ › ao lado da data de entrega mudam o sábado exibido (status, grupo da semana, sugestão e bolinhas acompanham). “Voltar ao próximo sábado” retorna ao padrão.
 - **Escolher o presenteador**: no modal de **Sugestão de família** há dois seletores, **grupo** (Grupo Elizeu, Grupo Rafael…) e **família** do grupo escolhido. Ao trocar o grupo, a melhor família dele é pré-selecionada. No modal **Detalhes da família** (aberto ao tocar numa família) esses dois seletores não aparecem.
 - **Agendar sábados futuros**: no modal da família há o seletor **Sábado da entrega** (próximos 26 sábados). Trocar o sábado na
@@ -130,7 +133,7 @@ tests/             testes automatizados
 
 ## App Android (APK, Android 13+)
 O app é o mesmo site embalado com Capacitor. Dentro dele, as lembranças viram **notificações nativas do Android**, que tocam
-**com o app fechado**: de **quarta a sábado**, nas horas de Configurações → Lembretes (padrão 08h, 11h, 14h, 17h, 20h), para cada
+**com o app fechado**: de **quarta a sábado**, nas horas de Configurações → Lembretes (padrão 08:00, 11:00, 14:00, 17:00, 20:00; aceita minutos), para cada
 sábado ainda **sem família confirmada**. Só **confirmar a família** cancela as notificações daquele sábado; abrir o app ou tocar na
 notificação não cancela nada. O app agenda os próximos 6 sábados e reagenda toda vez que é aberto ou que algo muda.
 
@@ -141,23 +144,27 @@ No celular: permita instalar apps desconhecidos, instale o APK e, na primeira ab
 Se o Android pedir, em Configurações do app → Bateria, deixe **Sem restrições** e permita **Alarmes e lembretes**.
 No app, os dados ficam só no aparelho (modo local); para sincronizar com o backend, informe o endereço em Configurações → Servidor.
 
-### Detalhes das notificações no app
-- **Vibração longa:** o canal de alerta (`lembretes-orador-v3`) é criado em código nativo (`MainActivity.java`, gerado por `scripts/ajustar-android.js` no build) com importância alta e uma vibração de **cerca de 1 minuto** (1,2 s vibrando / 0,5 s parado, 35 vezes). Se o build não conseguir criar esse canal, ele **falha com erro** em vez de gerar um APK com vibração curta.
-- **Reforço:** na semana que está valendo, cada horário se repete **2 vezes, a cada 3 minutos** (Configurações → Lembretes → *Reforço do alerta*; 0 desliga, até 4). Só **confirmar a família** cancela os lembretes e os reforços.
-- Ao tocar na notificação o app abre, mas ela **permanece** até você arrastá-la. Ao **abrir o app**, as notificações antigas já entregues são limpas da barra (as agendadas continuam).
-- **Testar alerta (5 s):** usa o mesmo canal e a mesma vibração dos lembretes. Bloqueie a tela ou saia do app para testar como no dia a dia. Cada teste usa um número novo, então nunca é tratado pelo Android como “atualização” silenciosa.
-- **Diagnóstico na tela:** em Configurações → Lembretes o app lê o canal como o Android o enxerga e mostra um aviso em vermelho se ele estiver com importância baixa, sem som ou sem vibração.
-
-### Se ainda tocar em silêncio
-O Android deixa o **usuário** (ou o próprio sistema) mudar um canal depois de criado, e alguns celulares reduzem avisos sozinhos. Confira, nesta ordem:
-1. **Desinstale o app antigo** e instale o novo APK (o canal novo `v3` só vale com a versão nova; canais antigos continuam com a vibração curta).
-2. Segure uma notificação do app → **Configurações** → *Lembretes da lembrancinha*: **Alerta/Urgente** (aparece na tela), **Som** ligado e **Vibração** ligada.
-3. **Não perturbe / Modos:** inclua o app como exceção ou o Android silencia tudo. Modo **silencioso** total também desliga a vibração; use *Vibrar* no botão de volume.
-4. **Android 15 / Pixel:** Configurações → Som e vibração → **Resfriamento de notificações** (*Notification cooldown*): desligue. Ele reduz volume e vibração de avisos seguidos do mesmo app, o que atrapalha testes repetidos e os reforços.
-5. **Samsung/Xiaomi/Motorola:** bateria do app em **Sem restrições** (ou “Não otimizar”), permita **Alarmes e lembretes** e desligue *notificações silenciosas automáticas / inteligentes* se existirem.
-6. Configurações → Lembretes → **Reagendar agora** e depois **Testar alerta**.
+### Alarme que insiste até você fechar (Android)
+Os lembretes **não usam mais** o som/vibração do canal de notificação (o Android corta isso em ~1 minuto e ainda reduz o volume
+das notificações seguintes). Agora o app tem um **alarme nativo próprio** (`android-nativo/`, copiado para o projeto pelo
+`scripts/ajustar-android.js`):
+- No horário, um alarme exato do Android liga um **serviço em primeiro plano** que **toca e vibra em loop** (som no volume de *Alarmes*,
+  vibração repetida) **até você arrastar a notificação para o lado ou tocar em "Parar"**. Abrir o app não para o alarme; aparece uma faixa
+  vermelha com o botão PARAR. Confirmar a família do sábado para o alarme e cancela os próximos.
+- Reagenda sozinho depois de reiniciar o celular, mudar hora/fuso ou atualizar o app. O próximo alarme é armado a cada disparo.
+- Se o Android barrar o serviço, cai numa notificação comum insistente (`FLAG_INSISTENT`) como reserva.
+- Notificação de tela cheia: acende a tela e aparece sobre o bloqueio.
+- **Configurações → Alarme insistente** (no app): duração (até fechar / 5 / 15 / 30 min / 1 h), som e vibração, e atalhos para cada liberação
+  do Android: Notificações, Bateria sem restrição, Alarmes e lembretes, Acender a tela bloqueada. A tela **Lembretes** mostra ✅/❌ de cada uma.
+- **Moto G75 (Android 15)**: Bateria → Uso da bateria do app → *Sem restrições*; mantenha o volume de *Alarmes* audível.
 - O nome do grupo da vez aparece só na primeira semana pendente; nas seguintes a notificação mostra apenas a data do sábado.
 - O ícone do app é a foto inteira (`img/icone.png`; tamanhos Android em `icone/`).
 
 ### Tema claro/escuro
 Em **Configurações → Aparência**: *Automático* (segue o tema do celular), *Claro* ou *Escuro*. A escolha vale só no aparelho e é aplicada na hora.
+
+
+## Navegação Android e notificações
+
+O botão Voltar do Android fecha primeiro o modal aberto, depois retorna pela pilha de páginas e só encerra o app quando já está no Painel.
+O alarme usa o volume de **Alarmes**, passa pelo Não Perturbe (alarmes são exceção padrão) e depende das liberações listadas acima.

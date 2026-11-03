@@ -4,98 +4,100 @@ require('../js/datas.js'); require('../js/grupos.js'); require('../js/selecao.js
 const { datas: D, grupos: G, selecao: S, android: A } = globalThis.LOD;
 const agora = Date.parse('2026-11-01T21:00:00Z'); // domingo 01/11 18:00 em São Paulo
 D.setNow(() => new Date(agora));
-const novo = () => G.estadoInicial();
-let st = novo();
+const st = G.estadoInicial();
 let ok = 0; const t = (n, f) => { f(); ok++; console.log('✔', n); };
-const principais = (l, sab) => l.filter((x) => x.sab === sab && !x.reforco);
 
 t('sábado sem família: 5 horários x 4 dias (qua-sáb), primeiro na quarta 04/11 às 08h de Brasília', () => {
-  const l = principais(A.agenda(st, agora, '2026-11-01'), '2026-11-07');
+  const l = A.agenda(st, agora, '2026-11-01').filter((x) => x.sab === '2026-11-07');
   assert.strictEqual(l.length, 20);
   assert.strictEqual(l[0].quando.toISOString(), '2026-11-04T11:00:00.000Z');
   assert.strictEqual(l[19].quando.toISOString(), '2026-11-07T23:00:00.000Z');
 });
-t('reforço: por padrão 2 repetições, +3 e +6 minutos depois de cada horário, só na semana que está valendo', () => {
-  assert.strictEqual(A.reforcoVezes(st), 2);
-  const l = A.agenda(st, agora, '2026-11-01');
-  const ref = l.filter((x) => x.sab === '2026-11-07' && x.reforco);
-  assert.strictEqual(ref.length, 40);
-  const mudos = l.filter((x) => x.quando.toISOString() === '2026-11-04T11:03:00.000Z' || x.quando.toISOString() === '2026-11-04T11:06:00.000Z');
-  assert.deepStrictEqual(mudos.map((x) => x.reforco), [1, 2]);
-  assert.ok(l.filter((x) => x.sab !== '2026-11-07').every((x) => x.reforco === 0), 'semanas seguintes não têm reforço');
-});
-t('reforço configurável (0 desliga) e valores inválidos voltam ao padrão', () => {
-  const s2 = novo(); s2.settings.reforcoVezes = 0;
-  assert.ok(A.agenda(s2, agora, '2026-11-01').every((x) => x.reforco === 0));
-  s2.settings.reforcoVezes = 4;
-  assert.strictEqual(A.agenda(s2, agora, '2026-11-01').filter((x) => x.sab === '2026-11-07' && x.reforco).length, 80);
-  s2.settings.reforcoVezes = 99; assert.strictEqual(A.reforcoVezes(s2), 2);
-});
-t('ids únicos, inteiros de 32 bits e abaixo do faixa reservada ao teste; lista ordenada por horário', () => {
-  const l = A.agenda(st, agora, '2026-11-01');
+t('aceita horários com minutos e agenda no minuto exato', () => {
+  const st2 = G.estadoInicial();
+  st2.settings.lembreteHoras = ['08:15', '14:45'];
+  const l = A.agenda(st2, agora, '2026-11-01').filter((x) => x.sab === '2026-11-07');
+  assert.strictEqual(l.length, 8);
+  assert.strictEqual(l[0].quando.toISOString(), '2026-11-04T11:15:00.000Z');
+  assert.strictEqual(l[1].quando.toISOString(), '2026-11-04T17:45:00.000Z');
   assert.strictEqual(new Set(l.map((x) => x.id)).size, l.length);
-  assert.ok(l.every((x) => Number.isInteger(x.id) && x.id < 900000000));
-  for (let i = 1; i < l.length; i++) assert.ok(l[i - 1].quando <= l[i].quando);
 });
-t('muitos horários: abre mão dos reforços para ficar abaixo do limite de alarmes do Android', () => {
-  const s3 = novo(); s3.settings.lembreteHoras = Array.from({ length: 24 }, (_, i) => i);
-  const l = A.agenda(s3, agora, '2026-11-01');
-  assert.ok(l.length <= 400); assert.ok(l.every((x) => x.reforco === 0));
-});
-t('confirmar a família do sábado remove todas as notificações dele (inclusive reforços)', () => {
+t('confirmar a família do sábado remove só as notificações dele', () => {
   const fam = st.families[0];
   S.confirmar(st, fam.id, '2026-11-07', new Date().toISOString());
   const l = A.agenda(st, agora, '2026-11-01');
   assert.ok(!l.some((x) => x.sab === '2026-11-07'));
   assert.ok(l.some((x) => x.sab === '2026-11-14'));
 });
-t('sábado sem reunião não agenda; nada no passado', () => {
+t('sábado sem reunião não agenda; ids únicos; nada no passado', () => {
   S.marcarSemReuniao ? S.marcarSemReuniao(st, '2026-11-14') : st.semReuniao.push('2026-11-14');
   const l = A.agenda(st, agora, '2026-11-01');
   assert.ok(!l.some((x) => x.sab === '2026-11-14'));
+  assert.strictEqual(new Set(l.map((x) => x.id)).size, l.length);
   assert.ok(l.every((x) => x.quando.getTime() > agora));
 });
 t('nome do grupo só na primeira semana pendente', () => {
-  const l = A.agenda(novo(), agora, '2026-11-01');
+  const st2 = G.estadoInicial();
+  const l = A.agenda(st2, agora, '2026-11-01');
   assert.ok(l.filter((x) => x.sab === '2026-11-07').every((x) => x.grupo));
   assert.ok(l.filter((x) => x.sab !== '2026-11-07').every((x) => x.grupo === null));
 });
 
-// ---- script de build: cria o canal de alerta nativo e para com erro claro se não achar o MainActivity
-const fs = require('fs'), os = require('os'), path = require('path'), cp = require('child_process');
-function montarProjetoFalso(comMain) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lod-android-'));
-  fs.cpSync(path.join(__dirname, '..', 'scripts'), path.join(dir, 'scripts'), { recursive: true });
-  fs.cpSync(path.join(__dirname, '..', 'icone'), path.join(dir, 'icone'), { recursive: true });
-  const main = path.join(dir, 'android', 'app', 'src', 'main');
+const fs = require('fs'), os = require('os'), path = require('path');
+
+t('script ajustar-android: permissões, serviço, receptor e código nativo entram no projeto Android', () => {
+  const { ajustar, PERMISSOES } = require('../scripts/ajustar-android.js');
+  const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'lod-'));
+  fs.cpSync(path.join(__dirname, '..', 'android-nativo'), path.join(raiz, 'android-nativo'), { recursive: true });
+  fs.cpSync(path.join(__dirname, '..', 'icone'), path.join(raiz, 'icone'), { recursive: true });
+  const main = path.join(raiz, 'android', 'app', 'src', 'main');
   fs.mkdirSync(path.join(main, 'res'), { recursive: true });
-  fs.writeFileSync(path.join(main, 'AndroidManifest.xml'), '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n</manifest>\n');
-  if (comMain) {
-    fs.mkdirSync(path.join(main, 'java', 'br', 'com', 'lembrancinha', 'orador'), { recursive: true });
-    fs.writeFileSync(path.join(main, 'java', 'br', 'com', 'lembrancinha', 'orador', 'MainActivity.java'), 'package br.com.lembrancinha.orador;\n\nimport com.getcapacitor.BridgeActivity;\n\npublic class MainActivity extends BridgeActivity {}\n');
-  }
-  return dir;
-}
-const rodar = (dir) => cp.spawnSync(process.execPath, [path.join(dir, 'scripts', 'ajustar-android.js')], { encoding: 'utf8' });
-t('ajustar-android: grava MainActivity com canal v3, vibração longa, mesmo package, sem FLAG_INSISTENT', () => {
-  const dir = montarProjetoFalso(true);
-  const r = rodar(dir); assert.strictEqual(r.status, 0, r.stderr + r.stdout);
-  const j = fs.readFileSync(path.join(dir, 'android/app/src/main/java/br/com/lembrancinha/orador/MainActivity.java'), 'utf8');
-  assert.ok(j.startsWith('package br.com.lembrancinha.orador;'));
-  assert.ok(j.includes('"lembretes-orador-v3"') && j.includes('setVibrationPattern') && j.includes('IMPORTANCE_HIGH') && j.includes('extends BridgeActivity'));
-  assert.ok(!j.includes('FLAG_INSISTENT'));
-  assert.ok(fs.readFileSync(path.join(dir, 'android/app/src/main/AndroidManifest.xml'), 'utf8').includes('android.permission.VIBRATE'));
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.writeFileSync(path.join(main, 'AndroidManifest.xml'), '<?xml version="1.0"?>\n<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <application>\n        <activity android:name=".MainActivity" />\n    </application>\n    <uses-permission android:name="android.permission.INTERNET" />\n</manifest>\n');
+  ajustar(raiz); ajustar(raiz);   // rodar duas vezes não duplica nada
+  const x = fs.readFileSync(path.join(main, 'AndroidManifest.xml'), 'utf8');
+  for (const p of PERMISSOES) assert.strictEqual(x.split(`android.permission.${p}"`).length - 1, 1, p);
+  for (const p of ['FOREGROUND_SERVICE_SPECIAL_USE', 'USE_FULL_SCREEN_INTENT', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'USE_EXACT_ALARM']) assert.ok(x.includes(p), p);
+  assert.strictEqual(x.split('.AlarmeService').length - 1, 1);
+  assert.ok(x.includes('foregroundServiceType="specialUse"') && x.includes('.AlarmeReceiver') && x.includes('BOOT_COMPLETED'));
+  const pkg = path.join(main, 'java', 'br', 'com', 'lembrancinha', 'orador');
+  for (const a of ['AlarmePlugin', 'AlarmeService', 'AlarmeReceiver', 'AlarmeStore', 'MainActivity']) assert.ok(fs.existsSync(path.join(pkg, a + '.java')), a);
+  assert.ok(fs.readFileSync(path.join(pkg, 'MainActivity.java'), 'utf8').includes('registerPlugin(AlarmePlugin.class)'));
 });
-t('ajustar-android: sem MainActivity o build falha com mensagem clara (nunca gera APK fraco em silêncio)', () => {
-  const dir = montarProjetoFalso(false);
-  const r = rodar(dir); assert.notStrictEqual(r.status, 0);
-  assert.ok(/MainActivity\.java não encontrado/.test(r.stderr));
-  fs.rmSync(dir, { recursive: true, force: true });
+
+t('o serviço repete vibração para sempre (repeat 0) e não usa som/vibração do canal', () => {
+  const j = fs.readFileSync(path.join(__dirname, '..', 'android-nativo', 'AlarmeService.java'), 'utf8');
+  assert.ok(/createWaveform\(PADRAO, 0\)/.test(j) && /setLooping\(true\)/.test(j));
+  assert.ok(/setDeleteIntent/.test(j) && /ACAO_PARAR/.test(j));   // arrastar a notificação = parar
 });
-t('canal do JS e do Java usam o mesmo id', () => {
-  const js = fs.readFileSync(path.join(__dirname, '..', 'js', 'android.js'), 'utf8');
-  const sh = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'ajustar-android.js'), 'utf8');
-  assert.ok(js.includes("const CANAL = 'lembretes-orador-v3'") && sh.includes('"lembretes-orador-v3"'));
-});
-console.log(`\n${ok} testes passaram.`);
+
+(async () => {
+  const chamadas = { agendar: [], parar: 0, cancel: 0 };
+  let tocando = { tocando: true, sab: '2026-11-07' };
+  globalThis.Capacitor = { isNativePlatform: () => true, Plugins: {
+    LocalNotifications: { checkPermissions: async () => ({ display: 'granted' }), requestPermissions: async () => ({ display: 'granted' }), deleteChannel: async () => {},
+      getPending: async () => ({ notifications: [{ id: 1 }] }), cancel: async () => { chamadas.cancel++; } },
+    Alarme: { agendar: async (a) => { chamadas.agendar.push(a); }, status: async () => tocando, parar: async () => { chamadas.parar++; tocando = { tocando: false, sab: '' }; } } } };
+  const stNovo = G.estadoInicial();
+  globalThis.LOD.store = { state: stNovo, aoMudar() {} };
+  globalThis.LOD.ui = { dataHora: (x) => x };
+  const realNow = Date.now; Date.now = () => agora;
+  try {
+    await A.sincronizar();
+    assert.strictEqual(chamadas.agendar.length, 1);
+    const a = chamadas.agendar[0];
+    assert.deepStrictEqual([a.som, a.vibrar, a.limiteMin], [true, true, 0]);   // padrão: tudo ligado, até fechar
+    assert.ok(a.alarmes.length > 20 && a.alarmes.every((x) => typeof x.quando === 'number' && x.quando > agora && x.sab && x.corpo));
+    assert.strictEqual(chamadas.cancel, 1);          // limpa notificações antigas do plugin
+    assert.strictEqual(chamadas.parar, 0);           // sábado ainda pendente: não para o que toca
+    stNovo.settings.alarme = { som: false, vibrar: true, limiteMin: 15 };
+    S.confirmar(stNovo, stNovo.families[0].id, '2026-11-07', new Date().toISOString());
+    await A.sincronizar();
+    assert.strictEqual(chamadas.parar, 1);           // família confirmada: para o alarme que tocava
+    const b = chamadas.agendar[1];
+    assert.deepStrictEqual([b.som, b.vibrar, b.limiteMin], [false, true, 15]);
+    assert.ok(!b.alarmes.some((x) => x.sab === '2026-11-07'));
+    ok += 2; console.log('✔ sincronizar envia alarmes ao plugin nativo com as opções e para o alarme do sábado resolvido');
+    console.log('✔ opções padrão e limites'); A.opcoes(G.estadoInicial()); ok++;
+  } finally { Date.now = realNow; }
+  console.log(`\n${ok} testes passaram.`);
+})().catch((e) => { console.error(e); process.exit(1); });

@@ -46,31 +46,58 @@
 
   /**
    * Grupo da semana de um sábado qualquer (inclusive futuro).
-   * Regra base: o grupo seguinte ao da entrega mais recente ANTES daquele sábado. Ajustes administrativos
-   * (definir/pular grupo) valem a partir do sábado em que foram feitos, até a próxima entrega.
+   * Regra: a vez só passa para o grupo seguinte quando uma família do PRÓPRIO grupo da vez entrega.
+   * Se entregar alguém de outro grupo, a vez continua com o grupo que ficou devendo (volta para ele na semana seguinte).
+   * Grupo que entregou fora da vez e ainda não tinha chegado a sua vez no ciclo (ordem Elizeu -> ... -> William)
+   * é pulado quando o rodízio chegar nele, para não presentear duas vezes seguidas.
+   * Ajustes administrativos (definir/pular grupo) valem a partir do sábado em que foram feitos e zeram esses créditos.
    * Sábados passados sem registro e sábados sem reunião não avançam o rodízio.
    * Projeção: a cada sábado futuro em aberto antes do pedido, o grupo avança um (supondo que cada semana
-   * será confirmada em ordem). Assim, olhar uma semana à frente mostra o grupo seguinte, e não o da semana atual.
+   * será confirmada pelo grupo da vez, em ordem).
    */
   function grupoDaSemana(state, sabadoIso) {
-    const r = state.rotation;
-    let prior = null, ov = null;
-    state.deliveries.forEach((d) => { if (d.saturday < sabadoIso && (!prior || d.saturday > prior.saturday)) prior = d; });
-    (r.overrides || []).forEach((o) => { if (o.aPartirDe <= sabadoIso && (!ov || o.aPartirDe >= ov.aPartirDe)) ov = o; });
-    let base = null, inicio = primeiroSabadoAberto(state);
-    if (ov && (!prior || prior.saturday < ov.aPartirDe)) {
-      const i = idxGrupo(state, ov.groupId);
-      if (i >= 0) { base = i; if (ov.aPartirDe > inicio) inicio = ov.aPartirDe; }
-    }
-    if (base === null && prior) {
-      const i = idxGrupo(state, prior.groupId);
-      if (i >= 0) base = i + 1;
-    }
-    if (base === null) base = typeof r.baseIndex === 'number' ? r.baseIndex : (r.nextGroupIndex || 0);
-    if (prior && prior.saturday >= inicio) inicio = D().addDias(prior.saturday, 7);
-    let avancos = 0;
-    for (let s = inicio; s < sabadoIso; s = D().addDias(s, 7)) if (aberto(state, s)) avancos++;
-    return grupoNum(state, base + avancos);
+    const r = state.rotation, n = state.groups.length;
+    const eventos = [];
+    (r.overrides || []).forEach((o) => { if (o.aPartirDe <= sabadoIso) eventos.push({ data: o.aPartirDe, ordem: 0, o }); });
+    state.deliveries.forEach((d) => { if (d.saturday < sabadoIso) eventos.push({ data: d.saturday, ordem: 1, d }); });
+    eventos.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : a.ordem - b.ordem));
+
+    const creditos = new Set(); // grupos à frente no ciclo que já entregaram fora da vez
+    // próximo grupo do rodízio, pulando (e consumindo o crédito de) quem já entregou fora da vez
+    const avancar = (de) => {
+      let i = de;
+      for (let k = 0; k < n; k++) {
+        i = (i + 1) % n;
+        if (creditos.has(i)) { creditos.delete(i); continue; }
+        return i;
+      }
+      return (de + 1) % n;
+    };
+
+    let p = typeof r.baseIndex === 'number' ? r.baseIndex : (r.nextGroupIndex || 0);
+    let corte = '';
+    eventos.forEach((e) => {
+      if (e.o) {
+        const i = idxGrupo(state, e.o.groupId);
+        if (i >= 0) { p = i; creditos.clear(); }
+        if (e.data > corte) corte = e.data;
+        return;
+      }
+      const d = e.d;
+      let vez = idxGrupo(state, d.rotationGroupId || d.groupId); // grupo que era da vez naquela semana
+      if (vez < 0) vez = p;
+      const real = idxGrupo(state, d.groupId);                   // grupo da família que entregou
+      if (d.retroativa) { p = (vez + 1) % n; creditos.clear(); }
+      else if (real < 0 || real === vez) p = avancar(vez);
+      else { p = vez; if (real > vez) creditos.add(real); }
+      const prox = D().addDias(d.saturday, 7);
+      if (prox > corte) corte = prox;
+    });
+
+    let inicio = primeiroSabadoAberto(state);
+    if (corte > inicio) inicio = corte;
+    for (let s = inicio; s < sabadoIso; s = D().addDias(s, 7)) if (aberto(state, s)) p = avancar(p);
+    return grupoNum(state, p);
   }
 
   /** Grupo da vez = grupo do primeiro sábado em aberto. */
@@ -85,6 +112,17 @@
     if (!Array.isArray(r.log)) r.log = [];
     if (!Array.isArray(r.overrides)) r.overrides = [];
     if (!Array.isArray(state.semReuniao)) state.semReuniao = [];
+    // Migra entregas antigas: registros passados preservam o grupo real; agendamentos futuros
+    // recebem o grupo previsto para a semana, sem confundir com o grupo da família escolhida.
+    // Reconstrói registros antigos em ordem cronológica usando o grupo previsto para a semana,
+    // nunca o grupo da família escolhida. Assim uma escolha manual fora do grupo não desvia o rodízio.
+    (state.deliveries || []).slice().sort((a, b) => a.saturday.localeCompare(b.saturday)).forEach((d) => {
+      if (!d.rotationGroupId) {
+        const previsto = grupoDaSemana(state, d.saturday) || G().grupo(state, d.groupId);
+        d.rotationGroupId = previsto.id;
+        d.rotationGroupName = previsto.name;
+      }
+    });
     if (typeof r.baseIndex !== 'number') {
       r.baseIndex = r.nextGroupIndex || 0;
       // dado antigo: preserva um "definir/pular grupo" que ainda não tinha virado entrega
@@ -203,6 +241,8 @@
     if (semReuniao(state, sabadoIso)) throw new Error('Este sábado está marcado como sem reunião.');
     if (entregaDoSabado(state, sabadoIso)) throw new Error('Já existe uma família confirmada para este sábado.');
     const grupo = G().grupo(state, fam.groupId);
+    // A semana mantém o grupo previsto no rodízio, mesmo quando outra família é escolhida manualmente.
+    const grupoDaRotacao = opcoes.retroativa ? grupo : grupoDaSemana(state, sabadoIso);
     const d = {
       id: G().novoId('d'),
       saturday: sabadoIso,
@@ -210,6 +250,8 @@
       familyName: fam.name,
       groupId: grupo.id,
       groupName: grupo.name,
+      rotationGroupId: grupoDaRotacao.id,
+      rotationGroupName: grupoDaRotacao.name,
       confirmedAt: agoraIso,
       completed: false,
       retroativa: !!opcoes.retroativa

@@ -4,6 +4,7 @@
   const D = () => LOD.datas, ST = () => LOD.store, U = () => LOD.ui, S = () => LOD.selecao, G = () => LOD.grupos;
   const esc = (s) => U().esc(s);
   const ROTAS = { painel: 'Painel', historico: 'Histórico', calendario: 'Calendário', grupos: 'Grupos', config: 'Configurações' };
+  let pilhaNavegacao = [], rotaAtual = null, voltarProgramatico = false;
 
   function rota() { const r = (location.hash || '#/painel').replace('#/', ''); return ROTAS[r] ? r : 'painel'; }
 
@@ -67,9 +68,8 @@
         <span class="sug-nome">${esc(f.name)}</span>
         <span class="sug-grid">
           <span><small>Grupo</small>${esc(G().rotulo(g.name))}</span>
-          <span><small>Responsável</small>${g.responsavel ? esc(g.responsavel) : 'Não cadastrado'}</span>
           <span><small>Última entrega</small>${st.ultima ? D().br(st.ultima) : 'Nunca participou'}</span>
-          <span><small>Semanas desde a última</small>${st.ultima ? D().textoSemanas(st.semanas) : 'Nunca participou'}</span>
+          <span><small>Semana Desde A Última vez que participou</small>${st.ultima ? D().textoSemanas(st.semanas) : 'Nunca participou'}</span>
         </span>
         <span class="sug-dica">Toque para ver detalhes, verificar ou confirmar</span></button>`;
     }
@@ -182,7 +182,7 @@
         <button class="btn btn-azul" data-acao="salvar-servidor">Salvar e reconectar</button></div>
 
       <div class="card"><h3>Rodízio</h3>
-        <p>Grupo da vez: <strong>${esc(G().rotulo(daVez.name))}</strong>. O rodízio só avança quando uma família é confirmada.</p>
+        <p>Grupo da vez: <strong>${esc(G().rotulo(daVez.name))}</strong>. O rodízio só avança quando uma família do grupo da vez é confirmada.</p>
         <div class="form linha"><label><span>Definir grupo da vez</span><select id="c-grupo">${state.groups.map((g) => `<option value="${g.id}"${g.id === daVez.id ? ' selected' : ''}>${esc(G().rotulo(g.name))}</option>`).join('')}</select></label></div>
         <button class="btn btn-sec" data-acao="definir-grupo">Definir</button>
         <button class="btn btn-laranja" data-acao="pular">Pular grupo da vez</button>
@@ -199,17 +199,32 @@
 
       <div class="card"><h3>Lembretes</h3>
         <p>Quarta a sábado, nos horários abaixo, enquanto o sábado alvo não tiver família confirmada. Abrir o site ou clicar numa notificação <strong>não</strong> cancela nada.</p>
-        <div class="form linha"><label><span>Horas (separadas por vírgula)</span><input id="c-horas" value="${s.lembreteHoras.join(', ')}"></label>
+        <div class="form linha"><label><span>Horários (separados por vírgula)</span><input id="c-horas" inputmode="text" placeholder="08:00, 11:30, 14:45" value="${s.lembreteHoras.map((h) => G().horarioTexto(h)).join(', ')}"></label>
         <label><span>Tópico ntfy (para celular com o site fechado)</span><input id="c-ntfy" value="${esc(s.ntfyTopic)}" placeholder="ex.: lembrancinha-gustavo-x7k2"></label></div>
-        ${nat ? `<input type="checkbox" id="c-notif" hidden ${s.notificacoesNavegador ? 'checked' : ''}><p id="c-nat">Verificando notificações do Android…</p>
-        <label class="outra"><span>Reforço do alerta (repete a notificação a cada 3 minutos, na semana que está valendo)</span><select id="c-reforco">${[[0, 'Desligado'], [1, '1 repetição'], [2, '2 repetições (recomendado)'], [3, '3 repetições'], [4, '4 repetições']].map(([v, t]) => `<option value="${v}"${LOD.android.reforcoVezes(state) === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
-        <p class="ajuda">Cada notificação vibra por cerca de 1 minuto. Só confirmar a família cancela os lembretes e os reforços.</p>` : `<label class="check"><input type="checkbox" id="c-notif" ${s.notificacoesNavegador ? 'checked' : ''}> Notificações do navegador (precisam de permissão e do site/navegador aberto)</label>
+        ${nat ? `<input type="checkbox" id="c-notif" hidden ${s.notificacoesNavegador ? 'checked' : ''}><p id="c-nat">Verificando notificações do Android…</p>` : `<label class="check"><input type="checkbox" id="c-notif" ${s.notificacoesNavegador ? 'checked' : ''}> Notificações do navegador (precisam de permissão e do site/navegador aberto)</label>
         <p>Permissão do navegador: <strong>${perm === 'granted' ? 'concedida' : perm === 'denied' ? 'bloqueada' : perm === 'indisponivel' ? 'indisponível neste navegador' : 'ainda não pedida'}</strong></p>`}
         <button class="btn btn-azul" data-acao="salvar-lembretes">Salvar</button>
-        ${nat ? `<button class="btn btn-sec" data-acao="teste-nativo">Testar alerta (5 s)</button>
-        <button class="btn btn-sec" data-acao="reagendar">Reagendar agora</button>` : `<button class="btn btn-sec" data-acao="permissao">Permitir notificações</button>
+        ${nat ? `<button class="btn btn-sec" data-acao="teste-nativo">Testar alarme (5 s)</button>
+        <button class="btn btn-sec" data-acao="reagendar">Reagendar agora</button> <button class="btn btn-sec" data-acao="parar-alarme">Parar alarme que está tocando</button>` : `<button class="btn btn-sec" data-acao="permissao">Permitir notificações</button>
         <button class="btn btn-sec" data-acao="teste-local">Testar notificação aqui</button>`}
         <button class="btn btn-sec" data-acao="teste-push"${modo === 'servidor' ? '' : ' disabled title="Requer o backend"'}>Testar push do servidor</button></div>
+
+      ${nat ? (() => {
+        const o = LOD.android.opcoes(state);
+        return `<div class="card"><h3>Alarme insistente (Android)</h3>
+        <p>O lembrete toca e vibra <strong>sem parar</strong> até você arrastar a notificação para o lado ou tocar em <strong>Parar</strong>. Para isso funcionar com o app fechado e a tela bloqueada, o Android precisa destas liberações — toque em cada botão e permita:</p>
+        <div class="form linha"><label><span>Quanto tempo insistir</span><select id="c-al-lim">${LOD.android.LIMITES.map(([v, t]) => `<option value="${v}"${o.limiteMin === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label></div>
+        <label class="check"><input type="checkbox" id="c-al-som" ${o.som ? 'checked' : ''}> Tocar som (usa o volume de <strong>Alarmes</strong> do celular)</label>
+        <label class="check"><input type="checkbox" id="c-al-vib" ${o.vibrar ? 'checked' : ''}> Vibrar</label>
+        <button class="btn btn-azul" data-acao="salvar-alarme">Salvar</button>
+        <h4>Liberações do Android</h4>
+        <button class="btn btn-sec" data-acao="aj-notificacoes">1. Notificações</button>
+        <button class="btn btn-sec" data-acao="aj-bateria">2. Bateria: sem restrição</button>
+        <button class="btn btn-sec" data-acao="aj-exatos">3. Alarmes e lembretes</button>
+        <button class="btn btn-sec" data-acao="aj-tela">4. Acender a tela bloqueada</button>
+        <button class="btn btn-sec" data-acao="aj-app">Abrir ajustes do app</button>
+        <p class="ajuda">No Moto G75 (Android 15): em <strong>Bateria → Uso da bateria do app → Lembrancinha do Orador</strong> escolha <strong>Sem restrições</strong>; e deixe o volume de <strong>Alarmes</strong> audível (Configurações → Som e vibração). O modo Não Perturbe não bloqueia alarmes, a menos que você tenha desligado essa exceção.</p></div>`;
+      })() : ''}
 
       <div class="card"><h3>Backup</h3>
         <p>O backup inclui grupos, responsáveis, famílias, histórico, rodízio e configurações.</p>
@@ -240,19 +255,21 @@
         else if (a === 'salvar-zap') { st.settings.whatsappNumber = $('c-zap').value.replace(/\D/g, ''); st.settings.messageTemplate = $('c-msg').value.trim() || G().MSG_PADRAO; ST().salvar(); U().toast('WhatsApp salvo.'); }
         else if (a === 'zap-padrao') { st.settings.messageTemplate = G().MSG_PADRAO; st.settings.whatsappNumber = '5511962662443'; ST().salvar(); }
         else if (a === 'salvar-lembretes') {
-          const horas = [...new Set($('c-horas').value.split(/[,;\s]+/).filter(Boolean).map(Number))];
-          if (!horas.length || horas.some((h) => !Number.isInteger(h) || h < 0 || h > 23)) throw new Error('Informe horas entre 0 e 23, separadas por vírgula.');
-          st.settings.lembreteHoras = horas.sort((x, y) => x - y); st.settings.ntfyTopic = $('c-ntfy').value.trim(); st.settings.notificacoesNavegador = $('c-notif').checked;
+          const horas = [...new Set($('c-horas').value.split(/[,;]+/).map((h) => h.trim()).filter(Boolean).map((h) => G().horarioTexto(h)))];
+          if (!horas.length || horas.some((h) => !Number.isFinite(G().minutosDoHorario(h)))) throw new Error('Informe horários válidos no formato HH:MM (ex.: 08:00, 11:30, 14:45).');
+          st.settings.lembreteHoras = horas.sort((x, y) => G().minutosDoHorario(x) - G().minutosDoHorario(y)); st.settings.ntfyTopic = $('c-ntfy').value.trim(); st.settings.notificacoesNavegador = $('c-notif').checked;
           const pen = Number($('c-pen').value); if (pen >= 0) st.settings.penalidadeResponsavelSemanas = pen;
-          if ($('c-reforco')) st.settings.reforcoVezes = Number($('c-reforco').value);
           ST().salvar(); U().toast('Lembretes salvos.');
         }
-        else if (a === 'teste-nativo') { await LOD.android.testar(); U().toast('O alerta toca em 5 segundos: bloqueie a tela ou saia do app para testar como no dia a dia.'); }
+        else if (a === 'teste-nativo') { await LOD.android.testar(); U().toast('O alarme toca em 5 segundos. Saia do app e bloqueie a tela para testar de verdade; arraste a notificação para parar.'); }
+        else if (a === 'parar-alarme') { await LOD.android.parar(); U().toast('Alarme parado.'); }
+        else if (a === 'salvar-alarme') { st.settings.alarme = { som: $('c-al-som').checked, vibrar: $('c-al-vib').checked, limiteMin: Number($('c-al-lim').value) || 0 }; ST().salvar(); U().toast('Alarme salvo.'); }
+        else if (a.startsWith('aj-')) { await LOD.android.abrirAjuste({ 'aj-notificacoes': 'notificacoes', 'aj-bateria': 'bateria', 'aj-exatos': 'exatos', 'aj-tela': 'telaCheia', 'aj-app': 'app' }[a]); }
         else if (a === 'reagendar') { await LOD.android.sincronizar(); const n = document.getElementById('c-nat'); if (n) n.innerHTML = await LOD.android.resumo(); U().toast('Lembretes reagendados.'); }
         else if (a === 'permissao') { const r = await LOD.notificacoes.pedirPermissao(); U().toast('Permissão: ' + r); configuracoes(cont); }
         else if (a === 'teste-local') { if (LOD.notificacoes.permissao() !== 'granted') throw new Error('Permita as notificações primeiro.'); new Notification('Lembrancinha do orador', { body: 'Teste: as notificações do navegador funcionam.' }); }
         else if (a === 'teste-push') { const r = await fetch(ST()._url('teste'), { method: 'POST', headers: ST()._headers() }); const j = await r.json().catch(() => ({})); U().toast(r.ok ? 'Push enviado.' : (j.erro || 'Falha ao enviar.'), r.ok ? '' : 'erro'); }
-        else if (a === 'exportar') ST().exportar();
+        else if (a === 'exportar') await ST().exportar();
         else if (a === 'importar') $('c-arq').click();
         if (a === 'salvar-zap' || a === 'zap-padrao' || a === 'definir-grupo') render();
       } catch (err) { U().toast(err.message, 'erro'); }
@@ -262,7 +279,22 @@
   async function iniciar() {
     await ST().iniciar();
     ST().aoMudar(render);
-    root.addEventListener('hashchange', render);
+    rotaAtual = rota();
+    root.addEventListener('hashchange', () => {
+      const nova = rota();
+      if (voltarProgramatico) voltarProgramatico = false;
+      else if (rotaAtual && nova !== rotaAtual) pilhaNavegacao.push(rotaAtual);
+      rotaAtual = nova;
+      render();
+    });
+    const AppNativo = root.Capacitor && root.Capacitor.Plugins && root.Capacitor.Plugins.App;
+    if (AppNativo && AppNativo.addListener) AppNativo.addListener('backButton', () => {
+      if (U().fecharModalTopo && U().fecharModalTopo()) return;
+      const anterior = pilhaNavegacao.pop();
+      if (anterior) { voltarProgramatico = true; location.hash = '#/' + anterior; return; }
+      if (rota() !== 'painel') { voltarProgramatico = true; location.hash = '#/painel'; return; }
+      if (AppNativo.exitApp) AppNativo.exitApp();
+    });
     document.getElementById('banner-lembrete').addEventListener('click', abrirSugestao);
     document.getElementById('modo-tag').textContent = ST().modo === 'servidor' ? 'sincronizado' : 'local';
     render();
