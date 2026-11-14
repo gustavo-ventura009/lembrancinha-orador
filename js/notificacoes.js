@@ -14,7 +14,8 @@
     if (agora.weekday < 3 || agora.weekday > 6) return { ativo: false, sab };
     const atual = agora.hour * 60 + (agora.minute || 0);
     const horarios = [...state.settings.lembreteHoras].map((h) => ({ texto: LOD.grupos.horarioTexto(h), minutos: LOD.grupos.minutosDoHorario(h) })).sort((a, b) => a.minutos - b.minutos);
-    const passados = horarios.filter((h) => h.minutos <= atual);
+    // "aguardando confirmação": horários ainda dentro da pausa (até quinta à noite) não contam
+    const passados = horarios.filter((h) => h.minutos <= atual && !S().pausado(state, sab, hojeIso, h.minutos));
     if (!passados.length) return { ativo: false, sab };
     const horario = passados[passados.length - 1];
     return { ativo: true, hora: horario.texto, chave: `${sab}|${hojeIso}|${horario.texto}` };

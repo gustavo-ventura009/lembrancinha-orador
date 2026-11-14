@@ -64,14 +64,16 @@
 
     const creditos = new Set(); // grupos à frente no ciclo que já entregaram fora da vez
     // próximo grupo do rodízio, pulando (e consumindo o crédito de) quem já entregou fora da vez
+    const vazio = (i) => !G().familiasAtivas(state, state.groups[i].id).length;   // grupo recém-criado/sem famílias não trava a vez
     const avancar = (de) => {
-      let i = de;
+      let i = de, primeiroVazio = -1;
       for (let k = 0; k < n; k++) {
         i = (i + 1) % n;
         if (creditos.has(i)) { creditos.delete(i); continue; }
+        if (vazio(i)) { if (primeiroVazio < 0) primeiroVazio = i; continue; }
         return i;
       }
-      return (de + 1) % n;
+      return primeiroVazio >= 0 ? primeiroVazio : (de + 1) % n;
     };
 
     let p = typeof r.baseIndex === 'number' ? r.baseIndex : (r.nextGroupIndex || 0);
@@ -112,6 +114,7 @@
     if (!Array.isArray(r.log)) r.log = [];
     if (!Array.isArray(r.overrides)) r.overrides = [];
     if (!Array.isArray(state.semReuniao)) state.semReuniao = [];
+    state.aguardando = (Array.isArray(state.aguardando) ? state.aguardando : []).filter((a) => a && /^\d{4}-\d{2}-\d{2}$/.test(a.sab || ''));
     // Migra entregas antigas: registros passados preservam o grupo real; agendamentos futuros
     // recebem o grupo previsto para a semana, sem confundir com o grupo da família escolhida.
     // Reconstrói registros antigos em ordem cronológica usando o grupo previsto para a semana,
@@ -132,6 +135,48 @@
     }
     sincronizar(state);
     return state;
+  }
+
+  /* ---------- Aguardando confirmação (pausa dos lembretes até quinta à noite) ---------- */
+  const PAUSA_PADRAO = '20:00';
+  const aguardandoDe = (state, sabIso) => (state.aguardando || []).find((a) => a.sab === sabIso) || null;
+
+  /** Quando a pausa de um sábado termina: a QUINTA-FEIRA da semana (2 dias antes) no horário configurado (padrão 20:00). */
+  function limitePausa(state, sabIso) {
+    let min = G().minutosDoHorario((state.settings && state.settings.aguardandoAte) || PAUSA_PADRAO);
+    if (!Number.isFinite(min)) min = G().minutosDoHorario(PAUSA_PADRAO);
+    const hora = String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
+    return { iso: D().addDias(sabIso, -2), minutos: min, hora };
+  }
+
+  /** O lembrete do dia/minuto informado está pausado? Só enquanto o sábado está "aguardando" e antes do limite de quinta. */
+  function pausado(state, sabIso, diaIso, minutos) {
+    if (!aguardandoDe(state, sabIso)) return false;
+    const l = limitePausa(state, sabIso);
+    return diaIso < l.iso || (diaIso === l.iso && minutos < l.minutos);
+  }
+
+  /** Lança erro se o sábado não puder ficar "aguardando" (sem reunião, já confirmado, prazo de quinta vencido…). */
+  function validarAguardando(state, sabIso, familyId) {
+    if (D().diaSemana(sabIso) !== 6) throw new Error('A data precisa ser um sábado.');
+    const fam = G().familia(state, familyId);
+    if (!fam || !fam.active) throw new Error('Família inválida ou inativa.');
+    if (semReuniao(state, sabIso)) throw new Error('Este sábado está marcado como sem reunião.');
+    if (entregaDoSabado(state, sabIso)) throw new Error('Este sábado já tem família confirmada.');
+    const ag = D().agora(), l = limitePausa(state, sabIso);
+    if (ag.iso > l.iso || (ag.iso === l.iso && ag.hour * 60 + ag.minute >= l.minutos))
+      throw new Error(`O prazo já passou: a pausa vai só até quinta-feira ${D().br(l.iso)} às ${l.hora}. Confirme a família ou escolha outra.`);
+    return fam;
+  }
+  function marcarAguardando(state, sabIso, familyId) {
+    const fam = validarAguardando(state, sabIso, familyId);
+    state.aguardando = (state.aguardando || []).filter((a) => a.sab !== sabIso);
+    state.aguardando.push({ sab: sabIso, familyId: fam.id, familyName: fam.name, em: new Date().toISOString() });
+    return aguardandoDe(state, sabIso);
+  }
+  /** Tira a pausa: os lembretes voltam a valer normalmente. */
+  function cancelarAguardando(state, sabIso) {
+    state.aguardando = (state.aguardando || []).filter((a) => a.sab !== sabIso);
   }
 
   /** Lista os próximos n sábados com o estado de cada um. */
@@ -257,6 +302,7 @@
       retroativa: !!opcoes.retroativa
     };
     state.deliveries.push(d);
+    cancelarAguardando(state, sabadoIso);   // confirmou: não há mais o que aguardar
     sincronizar(state);
     return d;
   }
@@ -277,6 +323,7 @@
     if (!state.semReuniao) state.semReuniao = [];
     if (!state.semReuniao.includes(sabadoIso)) state.semReuniao.push(sabadoIso);
     state.semReuniao.sort();
+    cancelarAguardando(state, sabadoIso);
     sincronizar(state);
   }
   function desmarcarSemReuniao(state, sabadoIso) {
@@ -304,6 +351,7 @@
   const S = {
     DIAS_VERMELHO, DIAS_AMARELO,
     entregasDa, stats, grupoDaVez, grupoDaSemana, primeiroSabadoAberto, sabadosFuturos, semReuniao, semaforo, normalizar, sincronizar,
+    aguardandoDe, limitePausa, pausado, validarAguardando, marcarAguardando, cancelarAguardando,
     entregaDoSabado, sugerir, alertaRecente, recalcularRotacao, confirmar, desfazer, marcarSemReuniao, desmarcarSemReuniao, pularGrupo, definirGrupoDaVez
   };
   LOD.selecao = S;

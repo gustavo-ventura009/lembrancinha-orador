@@ -26,6 +26,7 @@
           const quando = new Date(Date.UTC(y, m - 1, d, h + UTC_MENOS_3, min, 0));
           if (quando.getTime() <= agoraMs) return;
           const minutoDoDia = h * 60 + min;
+          if (S().pausado(state, sab, dia, minutoDoDia)) return;   // "aguardando confirmação": pausa até quinta à noite
           out.push({ id: (((((y % 100) * 100 + m) * 100 + d) * 1440) + minutoDoDia), quando, sab, grupo });
         });
       }
@@ -48,7 +49,9 @@
   async function pararSeResolvido(al) {
     try {
       const st = await al.status();
-      if (st.tocando && st.sab && (S().entregaDoSabado(ST().state, st.sab) || S().semReuniao(ST().state, st.sab))) await al.parar();
+      const ag = D().agora();
+      if (st.tocando && st.sab && (S().entregaDoSabado(ST().state, st.sab) || S().semReuniao(ST().state, st.sab)
+        || S().pausado(ST().state, st.sab, ag.iso, ag.hour * 60 + ag.minute))) await al.parar();
     } catch (e) { console.warn('Parar alarme resolvido:', e); }
   }
 
@@ -96,7 +99,9 @@
     const al = AL();
     const st = await al.status();
     const lista = agenda(ST().state, Date.now(), D().hoje());
-    const prox = lista.length ? `${lista.length} lembretes agendados; o próximo é ${LOD.ui.dataHora(lista[0].quando.toISOString())}.` : 'Nenhum lembrete pendente (todos os próximos sábados já têm família ou não têm reunião).';
+    const aguard = S().aguardandoDe(ST().state, D().proximoSabado(D().hoje()));
+    const pausa = aguard ? `⏳ Aguardando confirmação de <strong>${LOD.ui.esc(aguard.familyName)}</strong>: lembretes em pausa até quinta-feira às ${S().limitePausa(ST().state, aguard.sab).hora}.<br>` : '';
+    const prox = pausa + (lista.length ? `${lista.length} lembretes agendados; o próximo é ${LOD.ui.dataHora(lista[0].quando.toISOString())}.` : 'Nenhum lembrete pendente (todos os próximos sábados já têm família ou não têm reunião).');
     const linhas = [
       prox,
       st.tocando ? '🔔 <strong>Alarme tocando agora.</strong>' : '',

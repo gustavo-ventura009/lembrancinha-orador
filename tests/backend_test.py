@@ -29,5 +29,18 @@ node["semReuniao"] = ["2026-11-14"]; node["updatedAt"] = 6
 assert c.put("/api/state", json=node).status_code == 200
 assert A.verificar_lembretes(datetime(2026,11,11,11,0,tzinfo=tz), f) == "nada-a-enviar"    # sábado 14/11 sem reunião: não lembra
 assert A.verificar_lembretes(datetime(2026,11,18,8,0,tzinfo=tz), f) == "enviado"          # sábado 21/11 normal: volta
+# --- aguardando confirmação: pausa até quinta 20:00 e volta depois
+node["deliveries"] = []; node["semReuniao"] = []
+node["aguardando"] = [{"sab": "2026-11-21", "familyId": "f-001", "familyName": "x", "em": "2026-11-18T10:00:00Z"}]; node["updatedAt"] = 7
+assert c.put("/api/state", json=node).status_code == 200
+assert A.verificar_lembretes(datetime(2026,11,18,8,0,tzinfo=tz), f) == "nada-a-enviar"      # quarta: pausado
+assert A.verificar_lembretes(datetime(2026,11,19,19,59,tzinfo=tz), f) == "nada-a-enviar"    # quinta 19:59: ainda pausado
+assert A.verificar_lembretes(datetime(2026,11,19,20,0,tzinfo=tz), f) == "enviado"           # quinta 20:00: volta
+assert A.verificar_lembretes(datetime(2026,11,20,8,0,tzinfo=tz), f) == "enviado"            # sexta
+node["settings"]["aguardandoAte"] = "18:30"; node["updatedAt"] = 8
+assert c.put("/api/state", json=node).status_code == 200
+assert A.situacao_lembrete(node, datetime(2026,11,19,18,29,tzinfo=tz)) is None              # limite configurado em 18:30: 17:00 ainda é pausado
+assert A.situacao_lembrete(node, datetime(2026,11,19,18,30,tzinfo=tz)) is None              # no limite, mas nenhum horário de lembrete entre 18:30 e agora
+assert A.situacao_lembrete(node, datetime(2026,11,19,20,0,tzinfo=tz))["hora"] == "20:00"
 assert c.get("/").status_code == 200 and c.get("/js/app.js").status_code == 200 and c.get("/backend/app.py").status_code == 404
 print("backend OK;", len(env), "pushes simulados;", env[0])

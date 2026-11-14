@@ -70,6 +70,27 @@ def autorizado() -> bool:
 
 
 # ---------------------------------------------------------------- lembretes
+def limite_pausa(estado, sab: date):
+    """Quinta-feira da semana do sábado + horário em que os lembretes voltam (padrão 20:00)."""
+    valor = estado.get("settings", {}).get("aguardandoAte", "20:00")
+    try:
+        partes = str(valor).strip().split(":")
+        h = int(partes[0]); m = int(partes[1]) if len(partes) > 1 else 0
+        if len(partes) > 2 or not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError
+    except (ValueError, TypeError):
+        h, m = 20, 0
+    return sab - timedelta(days=2), h * 60 + m
+
+
+def pausado(estado, sab: date, dia: date, minutos: int) -> bool:
+    """Sábado marcado como "aguardando confirmação": sem lembretes até a quinta à noite."""
+    if not any(a.get("sab") == sab.isoformat() for a in estado.get("aguardando", []) if isinstance(a, dict)):
+        return False
+    quinta, limite = limite_pausa(estado, sab)
+    return dia < quinta or (dia == quinta and minutos < limite)
+
+
 def situacao_lembrete(estado, agora: datetime):
     """Mesma regra do navegador: quarta(2) a sábado(5) em Python, horas configuradas, sábado sem confirmação."""
     sab = proximo_sabado(agora.date())
@@ -94,7 +115,10 @@ def situacao_lembrete(estado, agora: datetime):
                 horarios.append(minutos)
         except (ValueError, TypeError):
             continue
-    passadas = sorted(set(m for m in horarios if m <= agora.hour * 60 + agora.minute))
+    passadas = sorted(set(
+        m for m in horarios
+        if m <= agora.hour * 60 + agora.minute and not pausado(estado, sab, agora.date(), m)
+    ))
     if not passadas:
         return None
     minuto = passadas[-1]

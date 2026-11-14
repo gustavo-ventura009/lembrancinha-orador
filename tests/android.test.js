@@ -43,6 +43,22 @@ t('nome do grupo só na primeira semana pendente', () => {
   assert.ok(l.filter((x) => x.sab !== '2026-11-07').every((x) => x.grupo === null));
 });
 
+t('aguardando confirmação: some só a pausa até quinta 20:00; quinta 20:00, sexta e sábado voltam', () => {
+  const st2 = G.estadoInicial();
+  const base = Date.parse('2026-11-04T11:00:00Z');         // quarta 08:00 em São Paulo
+  D.setNow(() => new Date(base));
+  S.marcarAguardando(st2, '2026-11-07', st2.families[0].id);
+  const l = A.agenda(st2, base, '2026-11-04').filter((x) => x.sab === '2026-11-07');
+  const horas = l.map((x) => x.quando.toISOString());
+  assert.ok(!horas.some((h) => h < '2026-11-05T23:00:00.000Z'));                 // nada antes de quinta 20:00 (23:00Z)
+  assert.ok(horas.includes('2026-11-05T23:00:00.000Z'));                          // quinta 20:00 volta
+  assert.ok(horas.includes('2026-11-06T11:00:00.000Z') && horas.includes('2026-11-07T11:00:00.000Z'));
+  assert.strictEqual(l.length, 1 + 5 + 5);                                        // quinta 20h + sexta (5) + sábado (5)
+  const outra = A.agenda(st2, base, '2026-11-04').filter((x) => x.sab === '2026-11-14');
+  assert.ok(outra.length > 0);                                                    // outro sábado não é afetado
+  D.setNow(() => new Date(agora));
+});
+
 const fs = require('fs'), os = require('os'), path = require('path');
 
 t('script ajustar-android: permissões, serviço, receptor e código nativo entram no projeto Android', () => {

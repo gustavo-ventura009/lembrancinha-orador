@@ -222,4 +222,103 @@ t('validação de backup rejeita dados quebrados', () => {
   const ruim = JSON.parse(JSON.stringify(novo())); ruim.semReuniao = ['amanhã'];
   assert.ok(st.validar(ruim).length > 0);
 });
+
+/* ---------- Novo grupo ---------- */
+t('adicionar grupo: entra no fim do rodízio, valida nome vazio e duplicado', () => {
+  const s = novo();
+  const g = G.adicionarGrupo(s, 'Marcos');
+  assert.strictEqual(s.groups.length, 7);
+  assert.strictEqual(s.groups[6].id, g.id);
+  assert.deepStrictEqual([g.responsavel, g.familiaResponsavelId], ['', null]);
+  assert.throws(() => G.adicionarGrupo(s, '   '), /nome do grupo/);
+  assert.throws(() => G.adicionarGrupo(s, 'marcos'), /Já existe/);
+  assert.throws(() => G.adicionarGrupo(s, 'Grupo Marcos'), /Já existe/);   // com ou sem o prefixo "Grupo"
+});
+t('grupo novo recebe famílias (adicionar e mover) e o histórico de quem foi movido permanece', () => {
+  const s = novo();
+  const g = G.adicionarGrupo(s, 'Marcos');
+  const fam = G.adicionarFamilia(s, 'Família Nova', g.id);
+  const mov = s.families[0];
+  S.confirmar(s, mov.id, '2026-11-07', new Date().toISOString());
+  G.moverFamilia(s, mov.id, g.id);
+  assert.strictEqual(G.familiasAtivas(s, g.id).length, 2);
+  assert.strictEqual(S.entregaDoSabado(s, '2026-11-07').groupName, 'Elizeu');   // histórico guarda o grupo da época
+  assert.ok(fam.active);
+});
+t('rodízio com 7 grupos: depois do William vem o grupo novo; grupo novo vazio é pulado', () => {
+  const s = novo(); S.definirGrupoDaVez(s, 'g-william', 'x');
+  const g = G.adicionarGrupo(s, 'Marcos');
+  assert.strictEqual(S.grupoDaVez(s, HOJE).id, 'g-william');
+  G.adicionarFamilia(s, 'Família Nova', g.id);
+  S.confirmar(s, G.familiasAtivas(s, 'g-william')[0].id, '2026-11-07', new Date().toISOString());
+  assert.strictEqual(S.grupoDaSemana(s, '2026-11-14').id, g.id);              // grupo novo, com família, entra na vez
+  const vazio = novo(); S.definirGrupoDaVez(vazio, 'g-william', 'x'); G.adicionarGrupo(vazio, 'Marcos');
+  S.confirmar(vazio, G.familiasAtivas(vazio, 'g-william')[0].id, '2026-11-07', new Date().toISOString());
+  assert.strictEqual(S.grupoDaSemana(vazio, '2026-11-14').id, 'g-elizeu');     // vazio: não trava a vez
+});
+t('backup com grupo novo passa na validação e na normalização', () => {
+  const s = novo(); G.adicionarGrupo(s, 'Marcos');
+  const st = require('../js/armazenamento.js');
+  assert.strictEqual(st.validar(JSON.parse(JSON.stringify(s))).length, 0);
+});
+
+/* ---------- Aguardando confirmação ---------- */
+const SAB = '2026-11-07';           // quinta = 05/11; limite padrão 20:00
+const agoraEm = (iso) => D.setNow(() => new Date(iso));
+t('aguardando: pausa até quinta 20:00 (antes dele pausado, a partir dele volta)', () => {
+  const s = novo(); agoraEm('2026-11-04T12:00:00Z');   // quarta 09:00 em São Paulo
+  S.marcarAguardando(s, SAB, s.families[0].id);
+  assert.ok(S.aguardandoDe(s, SAB));
+  assert.strictEqual(S.limitePausa(s, SAB).iso, '2026-11-05');
+  assert.strictEqual(S.limitePausa(s, SAB).hora, '20:00');
+  assert.ok(S.pausado(s, SAB, '2026-11-04', 8 * 60));
+  assert.ok(S.pausado(s, SAB, '2026-11-05', 19 * 60 + 59));
+  assert.ok(!S.pausado(s, SAB, '2026-11-05', 20 * 60));    // quinta 20:00: os alarmes voltam
+  assert.ok(!S.pausado(s, SAB, '2026-11-06', 8 * 60));     // sexta
+  assert.ok(!S.pausado(s, SAB, SAB, 8 * 60));              // sábado
+  assert.ok(!S.pausado(s, '2026-11-14', '2026-11-12', 8 * 60));   // outro sábado não é afetado
+});
+t('aguardando: horário de retomada configurável', () => {
+  const s = novo(); s.settings.aguardandoAte = '18:30'; agoraEm('2026-11-04T12:00:00Z');
+  S.marcarAguardando(s, SAB, s.families[0].id);
+  assert.ok(S.pausado(s, SAB, '2026-11-05', 18 * 60 + 29));
+  assert.ok(!S.pausado(s, SAB, '2026-11-05', 18 * 60 + 30));
+  s.settings.aguardandoAte = 'lixo';
+  assert.strictEqual(S.limitePausa(s, SAB).hora, '20:00');   // valor inválido volta ao padrão
+});
+t('aguardando: confirmar, sem reunião ou retomar encerram a pausa', () => {
+  const s = novo(); agoraEm('2026-11-04T12:00:00Z');
+  S.marcarAguardando(s, SAB, s.families[0].id); S.cancelarAguardando(s, SAB);
+  assert.ok(!S.aguardandoDe(s, SAB));
+  S.marcarAguardando(s, SAB, s.families[0].id);
+  S.confirmar(s, s.families[1].id, SAB, new Date().toISOString());
+  assert.ok(!S.aguardandoDe(s, SAB) && s.aguardando.length === 0);
+  S.marcarAguardando(s, '2026-11-14', s.families[0].id);
+  S.marcarSemReuniao(s, '2026-11-14');
+  assert.strictEqual(s.aguardando.length, 0);
+});
+t('aguardando: recusa se o prazo de quinta já passou, sábado confirmado, sem reunião ou família inativa', () => {
+  const s = novo();
+  agoraEm('2026-11-05T23:30:00Z');                         // quinta 20:30 em São Paulo
+  assert.throws(() => S.marcarAguardando(s, SAB, s.families[0].id), /prazo já passou/);
+  agoraEm('2026-11-06T12:00:00Z');                         // sexta
+  assert.throws(() => S.marcarAguardando(s, SAB, s.families[0].id), /prazo já passou/);
+  agoraEm('2026-11-04T12:00:00Z');
+  assert.throws(() => S.marcarAguardando(s, '2026-11-08', s.families[0].id), /sábado/);
+  S.marcarSemReuniao(s, '2026-11-14');
+  assert.throws(() => S.marcarAguardando(s, '2026-11-14', s.families[0].id), /sem reunião/);
+  S.confirmar(s, s.families[0].id, SAB, new Date().toISOString());
+  assert.throws(() => S.marcarAguardando(s, SAB, s.families[1].id), /já tem família/);
+  s.families[2].active = false;
+  assert.throws(() => S.marcarAguardando(s, '2026-11-21', s.families[2].id), /inativa/);
+  D.setNow(() => new Date('2026-11-01T21:00:00Z'));
+});
+t('aguardando: dados antigos sem o campo são normalizados', () => {
+  const s = JSON.parse(JSON.stringify(novo())); delete s.aguardando; delete s.settings.aguardandoAte;
+  S.normalizar(s);
+  assert.deepStrictEqual(s.aguardando, []);
+  assert.strictEqual(S.limitePausa(s, SAB).hora, '20:00');
+});
+D.setNow(() => new Date('2026-11-01T21:00:00Z'));
+
 console.log(`\n${ok} testes passaram.`);

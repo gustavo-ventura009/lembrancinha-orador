@@ -123,6 +123,7 @@
       const info = lista.find((x) => x.iso === sab);
       podeConfirmar = fam.active && !info.entrega && !info.semReuniao;
       const ehResp = G().ehResponsavel(state, fam);
+      const aguardo = S().aguardandoDe(state, sab), limite = S().limitePausa(state, sab);
       const parts = S().entregasDa(state, fam.id);
       const optSab = lista.map((x) => {
         const rot = D().br(x.iso) + (x.iso === lista[0].iso ? ' (próximo)' : '') + (x.entrega ? ` — já tem ${x.entrega.familyName}` : x.semReuniao ? ' — sem reunião' : ` — ${G().rotulo(S().grupoDaSemana(state, x.iso).name)}`);
@@ -139,6 +140,7 @@
         <label class="outra"><span>Sábado da entrega</span><select data-sab>${optSab}</select></label>
         ${info.entrega ? `<p class="aviso">O sábado ${D().br(sab)} já tem família confirmada: ${esc(info.entrega.familyName)}. Escolha outra data.</p>` : ''}
         ${info.semReuniao ? `<p class="aviso">O sábado ${D().br(sab)} está marcado como sem reunião. Escolha outra data.</p>` : ''}
+        ${aguardo ? `<p class="aviso aviso-aguardando">⏳ Aguardando confirmação${aguardo.familyName ? ' de ' + esc(aguardo.familyName) : ''}. Lembretes em pausa até quinta-feira ${D().br(limite.iso)} às ${limite.hora}; se não for confirmada até lá, os alarmes voltam.</p>` : ''}
         <div class="det-nome">${esc(fam.name)} ${ehResp ? '<span class="tag tag-azul">★ Família do responsável</span>' : ''}${fam.active ? '' : '<span class="tag tag-cinza">Inativa</span>'}</div>
         <dl class="det">
           <dt>Grupo</dt><dd>${esc(G().rotulo(grupo.name))}</dd>
@@ -154,7 +156,14 @@
         ${parts.length ? `<details class="parts"><summary>Participações anteriores (${parts.length})</summary><ul>${parts.map((d) => `<li>${D().br(d.saturday)} — ${esc(G().rotulo(d.groupName))}</li>`).join('')}</ul></details>` : ''}`;
       atualizarBotoes();
     }
-    function atualizarBotoes() { if (botoesRod[1]) botoesRod[1].disabled = !podeConfirmar; }
+    function atualizarBotoes() {
+      if (botoesRod[1]) {   // ⏳ aguardando confirmação (ou, se já está aguardando, retomar os lembretes)
+        const aguardando = !!S().aguardandoDe(state, sab);
+        botoesRod[1].textContent = aguardando ? '▶ RETOMAR LEMBRETES' : '⏳ AGUARDANDO CONFIRMAÇÃO';
+        botoesRod[1].disabled = !podeConfirmar;
+      }
+      if (botoesRod[2]) botoesRod[2].disabled = !podeConfirmar;
+    }
 
     corpo.addEventListener('change', (e) => {
       if (e.target.matches('[data-sab]')) {
@@ -174,11 +183,37 @@
       titulo: opcoes.sugestao ? 'Sugestão de família' : 'Detalhes da família', corpo,
       botoes: [
         { texto: '💬 VERIFICAR FAMÍLIA', classe: 'btn-laranja', aoClicar: () => LOD.whatsapp.abrir(state, G().familia(state, fid).name) },
+        { texto: '⏳ AGUARDANDO CONFIRMAÇÃO', classe: 'btn-azul', aoClicar: () => alternarAguardando(fid, sab, desenhar) },
         { texto: '✔ CONFIRMAR', classe: 'btn-verde', aoClicar: () => fluxoConfirmar(fid, sab) }
       ]
     });
     botoesRod = [...corpo.closest('.overlay').querySelectorAll('.modal-rodape .btn')];
     atualizarBotoes();
+  }
+
+  /* ---------- Aguardando confirmação: pausa os lembretes até quinta à noite ---------- */
+  function alternarAguardando(familyId, sab, aoMudar) {
+    const state = ST().state;
+    const fam = G().familia(state, familyId), limite = S().limitePausa(state, sab);
+    if (S().aguardandoDe(state, sab)) {
+      return dialogo({
+        titulo: 'Retomar lembretes', mensagem: `Cancelar a espera e voltar a tocar os lembretes do sábado ${D().br(sab)} normalmente?`,
+        ok: 'RETOMAR', classeOk: 'btn-laranja',
+        aoOk: () => { S().cancelarAguardando(state, sab); ST().salvar(); toast('Lembretes retomados.'); aoMudar && aoMudar(); }
+      });
+    }
+    try { S().validarAguardando(state, sab, familyId); } catch (e) { return toast(e.message, 'erro'); }   // avisa já, antes de perguntar
+    dialogo({
+      titulo: 'Aguardando confirmação',
+      mensagem: `Pausar os lembretes do sábado ${D().br(sab)} enquanto ${fam.name} responde? Os alarmes ficam em silêncio até quinta-feira ${D().br(limite.iso)} às ${limite.hora}. Se a família não for confirmada até lá, eles voltam a tocar. Confirmar a família encerra os lembretes da semana.`,
+      ok: 'PAUSAR LEMBRETES', classeOk: 'btn-azul',
+      aoOk: () => {
+        try { S().marcarAguardando(state, sab, familyId); } catch (e) { return toast(e.message, 'erro'); }
+        ST().salvar();
+        toast(`Lembretes em pausa até quinta ${limite.hora}.`);
+        aoMudar && aoMudar();
+      }
+    });
   }
 
   /* ---------- Confirmação (alerta -> pergunta -> registro) ---------- */

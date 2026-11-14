@@ -74,8 +74,10 @@
         <span class="sug-dica">Toque para ver detalhes, verificar ou confirmar</span></button>`;
     }
 
-    const statusTxt = confirmada ? 'Confirmada' : semReuniao ? 'Sem reunião' : passado ? 'Sem registro' : 'Pendente';
-    const statusCls = confirmada ? 'tag-verde' : semReuniao || passado ? 'tag-cinza' : 'tag-amarelo';
+    const aguardo = !confirmada && !semReuniao && !passado ? S().aguardandoDe(state, sab) : null;
+    const limite = S().limitePausa(state, sab);
+    const statusTxt = confirmada ? 'Confirmada' : semReuniao ? 'Sem reunião' : passado ? 'Sem registro' : aguardo ? 'Aguardando confirmação' : 'Pendente';
+    const statusCls = confirmada ? 'tag-verde' : semReuniao || passado ? 'tag-cinza' : aguardo ? 'tag-azul' : 'tag-amarelo';
 
     cont.innerHTML = `
       <section class="indicadores">
@@ -92,6 +94,8 @@
         <div class="ind"><small>Última entrega</small><strong>${ultima ? esc(ultima.familyName) : 'Nenhuma'}</strong></div>
         <div class="ind"><small>Data da última entrega</small><strong>${ultima ? D().br(ultima.saturday) : '—'}</strong></div>
       </section>
+      ${aguardo ? `<p class="aviso aviso-aguardando">⏳ Aguardando confirmação${aguardo.familyName ? ' de <strong>' + esc(aguardo.familyName) + '</strong>' : ''}. Lembretes em pausa até quinta-feira ${D().br(limite.iso)} às ${limite.hora}; se não for confirmada até lá, os alarmes voltam.
+        <button class="link" data-acao="retomar" data-sab="${sab}">Retomar lembretes agora</button></p>` : ''}
       ${blocoSug}
       ${(confirmada || semReuniao) && livre !== sab ? `<p class="prox-livre"><button class="btn btn-sec" data-acao="sugestao-livre" data-sab="${livre}">📅 Agendar o próximo sábado livre (${D().br(livre)})</button></p>` : ''}
       <nav class="acesso">
@@ -116,6 +120,7 @@
       const a = t.dataset.acao;
       if (a === 'sugestao' || a === 'sugestao-livre') abrirSugestao(t.dataset.sab);
       else if (a === 'registrar') U().registrarAnterior(t.dataset.sab);
+      else if (a === 'retomar') { S().cancelarAguardando(ST().state, t.dataset.sab); ST().salvar(); U().toast('Lembretes retomados.'); }
       else if (a === 'sab-ant') { sabVisto = D().addDias(sab, -7); render(); }
       else if (a === 'sab-prox') { sabVisto = D().addDias(sab, 7); render(); }
       else if (a === 'sab-hoje') { sabVisto = null; render(); }
@@ -126,7 +131,7 @@
   /* ---------------- Grupos ---------------- */
   function paginaGrupos(cont) {
     const state = ST().state;
-    cont.innerHTML = `<div class="pagina-topo"><h2>GRUPOS E FAMÍLIAS</h2></div>
+    cont.innerHTML = `<div class="pagina-topo"><h2>GRUPOS E FAMÍLIAS</h2><button class="btn btn-verde" data-acao="novo-grupo">+ Novo grupo</button></div>
       ${state.groups.map((g) => {
         const ativas = G().familiasAtivas(state, g.id);
         const inativas = state.families.filter((f) => !f.active && f.groupId === g.id);
@@ -148,7 +153,10 @@
       const t = e.target.closest('[data-acao]');
       if (!t) return;
       const st = ST().state, a = t.dataset.acao, gid = t.dataset.g, fid = t.dataset.f;
-      if (a === 'add') U().form({ titulo: 'Nova família — ' + G().rotulo(G().grupo(st, gid).name), campos: [{ nome: 'nome', rotulo: 'Nome da família' }], aoEnviar: (v) => { G().adicionarFamilia(st, v.nome, gid); salvar(); U().toast('Família adicionada.'); } });
+      if (a === 'novo-grupo') U().form({ titulo: 'Novo grupo', textoOk: 'Criar grupo',
+        campos: [{ nome: 'nome', rotulo: 'Nome do grupo', placeholder: 'Ex.: Marcos', ajuda: 'O grupo entra no fim do rodízio, depois do último grupo. Grupos sem famílias são pulados até você adicioná-las (+ Família ou Mover).' }],
+        aoEnviar: (v) => { const g = G().adicionarGrupo(st, v.nome); salvar(); U().toast(`${G().rotulo(g.name)} criado. Adicione as famílias ou mova famílias de outro grupo.`); } });
+      else if (a === 'add') U().form({ titulo: 'Nova família — ' + G().rotulo(G().grupo(st, gid).name), campos: [{ nome: 'nome', rotulo: 'Nome da família' }], aoEnviar: (v) => { G().adicionarFamilia(st, v.nome, gid); salvar(); U().toast('Família adicionada.'); } });
       else if (a === 'editar') U().form({ titulo: 'Editar família', campos: [{ nome: 'nome', rotulo: 'Nome', valor: G().familia(st, fid).name }], aoEnviar: (v) => { G().editarFamilia(st, fid, v.nome); salvar(); } });
       else if (a === 'mover') U().form({ titulo: 'Mover para outro grupo', campos: [{ nome: 'g', rotulo: 'Novo grupo', tipo: 'select', valor: G().familia(st, fid).groupId, opcoes: st.groups.map((g) => ({ valor: g.id, texto: G().rotulo(g.name) })) }], textoOk: 'Mover', aoEnviar: (v) => { G().moverFamilia(st, fid, v.g); salvar(); U().toast('O histórico permanece com o grupo da época.'); } });
       else if (a === 'remover') U().dialogo({ titulo: 'Excluir família', mensagem: `Excluir “${G().familia(st, fid).name}” da lista ativa? O histórico de entregas será mantido.`, ok: 'EXCLUIR', classeOk: 'btn-vermelho', aoOk: () => { G().removerFamilia(st, fid); salvar(); } });
@@ -198,8 +206,9 @@
         <button class="btn btn-azul" data-acao="salvar-zap">Salvar</button> <button class="btn btn-sec" data-acao="zap-padrao">Restaurar padrão</button></div>
 
       <div class="card"><h3>Lembretes</h3>
-        <p>Quarta a sábado, nos horários abaixo, enquanto o sábado alvo não tiver família confirmada. Abrir o site ou clicar numa notificação <strong>não</strong> cancela nada.</p>
+        <p>Quarta a sábado, nos horários abaixo, enquanto o sábado alvo não tiver família confirmada. Abrir o site ou clicar numa notificação <strong>não</strong> cancela nada. O botão <strong>Aguardando confirmação</strong> (ao escolher uma família) pausa os lembretes até a quinta-feira no horário de retomada abaixo; se a família não for confirmada até lá, os alarmes voltam.</p>
         <div class="form linha"><label><span>Horários (separados por vírgula)</span><input id="c-horas" inputmode="text" placeholder="08:00, 11:30, 14:45" value="${s.lembreteHoras.map((h) => G().horarioTexto(h)).join(', ')}"></label>
+        <label><span>Retomar lembretes na quinta às (se estiver "aguardando confirmação")</span><input id="c-aguard" inputmode="text" placeholder="20:00" value="${G().horarioTexto(s.aguardandoAte || '20:00')}"></label>
         <label><span>Tópico ntfy (para celular com o site fechado)</span><input id="c-ntfy" value="${esc(s.ntfyTopic)}" placeholder="ex.: lembrancinha-gustavo-x7k2"></label></div>
         ${nat ? `<input type="checkbox" id="c-notif" hidden ${s.notificacoesNavegador ? 'checked' : ''}><p id="c-nat">Verificando notificações do Android…</p>` : `<label class="check"><input type="checkbox" id="c-notif" ${s.notificacoesNavegador ? 'checked' : ''}> Notificações do navegador (precisam de permissão e do site/navegador aberto)</label>
         <p>Permissão do navegador: <strong>${perm === 'granted' ? 'concedida' : perm === 'denied' ? 'bloqueada' : perm === 'indisponivel' ? 'indisponível neste navegador' : 'ainda não pedida'}</strong></p>`}
@@ -258,6 +267,9 @@
           const horas = [...new Set($('c-horas').value.split(/[,;]+/).map((h) => h.trim()).filter(Boolean).map((h) => G().horarioTexto(h)))];
           if (!horas.length || horas.some((h) => !Number.isFinite(G().minutosDoHorario(h)))) throw new Error('Informe horários válidos no formato HH:MM (ex.: 08:00, 11:30, 14:45).');
           st.settings.lembreteHoras = horas.sort((x, y) => G().minutosDoHorario(x) - G().minutosDoHorario(y)); st.settings.ntfyTopic = $('c-ntfy').value.trim(); st.settings.notificacoesNavegador = $('c-notif').checked;
+          const ret = G().horarioTexto($('c-aguard').value.trim() || '20:00');
+          if (!Number.isFinite(G().minutosDoHorario(ret))) throw new Error('Informe o horário de retomada no formato HH:MM (ex.: 20:00).');
+          st.settings.aguardandoAte = ret;
           const pen = Number($('c-pen').value); if (pen >= 0) st.settings.penalidadeResponsavelSemanas = pen;
           ST().salvar(); U().toast('Lembretes salvos.');
         }

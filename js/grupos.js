@@ -46,11 +46,13 @@
       deliveries: [],
       rotation: { nextGroupIndex: 0, baseIndex: 0, overrides: [], log: [] },
       semReuniao: [],
+      aguardando: [],
       settings: {
         whatsappNumber: '5511962662443',
         messageTemplate: MSG_PADRAO,
         penalidadeResponsavelSemanas: 4,
         lembreteHoras: [8, 11, 14, 17, 20],
+        aguardandoAte: '20:00',   // quinta-feira: horário em que os lembretes voltam se a família ainda não foi confirmada
         ntfyTopic: '',
         notificacoesNavegador: true
       }
@@ -104,6 +106,16 @@
         if (!f || f.groupId !== groupId || !f.active) throw new Error('A família do responsável precisa ser uma família ativa do mesmo grupo.');
       }
       g.familiaResponsavelId = familiaId || null;
+    },
+    /** Cria um grupo novo no FIM do rodízio (depois do último grupo atual). */
+    adicionarGrupo(state, nome) {
+      nome = (nome || '').trim();
+      if (!nome) throw new Error('Informe o nome do grupo.');
+      const limpo = (x) => String(x).replace(/^grupo\s+/i, '').trim().toLowerCase();
+      if (state.groups.some((g) => limpo(g.name) === limpo(nome))) throw new Error('Já existe um grupo com esse nome.');
+      const g = { id: novoId('g'), name: nome, responsavel: '', familiaResponsavelId: null };
+      state.groups.push(g);
+      return g;
     },
     renomearGrupo(state, groupId, nome) {
       nome = (nome || '').trim();
